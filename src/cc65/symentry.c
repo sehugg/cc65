@@ -71,6 +71,7 @@ SymEntry* NewSymEntry (const char* Name, unsigned Flags)
     E->Type     = 0;
     E->Attr     = 0;
     E->AsmName  = 0;
+    E->V.BssName = 0;
     memcpy (E->Name, Name, Len+1);
 
     /* Return the new entry */
@@ -82,8 +83,19 @@ SymEntry* NewSymEntry (const char* Name, unsigned Flags)
 void FreeSymEntry (SymEntry* E)
 /* Free a symbol entry */
 {
+    unsigned i;
+
     TypeFree (E->Type);
     xfree (E->AsmName);
+
+    if (E->Flags & SC_LABEL) {
+        for (i = 0; i < CollCount (E->V.L.DefsOrRefs); i++) {
+            xfree (CollAt (E->V.L.DefsOrRefs, i));
+        }
+
+        DoneCollection (E->V.L.DefsOrRefs);
+    }
+
     xfree (E);
 }
 

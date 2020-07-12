@@ -317,12 +317,12 @@ static CodeEntry* ParseInsn (CodeSeg* S, LineInfo* LI, const char* L)
                 /* Expect zp x indirect */
                 L = SkipSpace (L+1);
                 if (toupper (*L) != 'X') {
-                    Error ("ASM code error: `X' expected");
+                    Error ("ASM code error: 'X' expected");
                     return 0;
                 }
                 L = SkipSpace (L+1);
                 if (*L != ')') {
-                    Error ("ASM code error: `)' expected");
+                    Error ("ASM code error: ')' expected");
                     return 0;
                 }
                 L = SkipSpace (L+1);
@@ -337,7 +337,7 @@ static CodeEntry* ParseInsn (CodeSeg* S, LineInfo* LI, const char* L)
                 if (*L == ',') {
                     L = SkipSpace (L+1);
                     if (toupper (*L) != 'Y') {
-                        Error ("ASM code error: `Y' expected");
+                        Error ("ASM code error: 'Y' expected");
                         return 0;
                     }
                     L = SkipSpace (L+1);
@@ -378,7 +378,7 @@ static CodeEntry* ParseInsn (CodeSeg* S, LineInfo* LI, const char* L)
                     /* Check for subroutine call to local label */
                     if ((OPC->Info & OF_CALL) && IsLocalLabelName (Arg)) {
                         Error ("ASM code error: "
-                               "Cannot use local label `%s' in subroutine call",
+                               "Cannot use local label '%s' in subroutine call",
                                Arg);
                     }
                     AM = AM65_ABS;
@@ -426,8 +426,10 @@ static CodeEntry* ParseInsn (CodeSeg* S, LineInfo* LI, const char* L)
         unsigned Hash = HashStr (Arg) % CS_LABEL_HASH_SIZE;
         Label = CS_FindLabel (S, Arg, Hash);
 
-        /* If we don't have the label, it's a forward ref - create it */
-        if (Label == 0) {
+        /* If we don't have the label, it's a forward ref - create it unless
+        ** it's an external function.
+        */
+        if (Label == 0 && (OPC->OPC != OP65_JMP || IsLocalLabelName (Arg)) ) {
             /* Generate a new label */
             Label = CS_NewCodeLabel (S, Arg, Hash);
         }
@@ -532,7 +534,7 @@ void CS_AddVLine (CodeSeg* S, LineInfo* LI, const char* Format, va_list ap)
         case '.':
             /* Control instruction */
             ReadToken (L, " \t", Token, sizeof (Token));
-            Error ("ASM code error: Pseudo instruction `%s' not supported", Token);
+            Error ("ASM code error: Pseudo instruction '%s' not supported", Token);
             break;
 
         default:
@@ -780,7 +782,7 @@ CodeLabel* CS_AddLabel (CodeSeg* S, const char* Name)
     if (L) {
         /* We found it - be sure it does not already have an owner */
         if (L->Owner) {
-            Error ("ASM label `%s' is already defined", Name);
+            Error ("ASM label '%s' is already defined", Name);
             return L;
         }
     } else {
@@ -790,7 +792,7 @@ CodeLabel* CS_AddLabel (CodeSeg* S, const char* Name)
 
     /* Safety. This call is quite costly, but safety is better */
     if (CollIndex (&S->Labels, L) >= 0) {
-        Error ("ASM label `%s' is already defined", Name);
+        Error ("ASM label '%s' is already defined", Name);
         return L;
     }
 
@@ -906,7 +908,7 @@ void CS_MergeLabels (CodeSeg* S)
 
                 /* Print some debugging output */
                 if (Debug) {
-                    printf ("Removing unused global label `%s'", X->Name);
+                    printf ("Removing unused global label '%s'", X->Name);
                 }
 
                 /* And free the label */
@@ -1351,7 +1353,7 @@ void CS_OutputEpilogue (const CodeSeg* S)
 */
 {
     if (S->Func) {
-        WriteOutput ("\n.endproc\n\n");
+        WriteOutput (".endproc\n\n");
     }
 }
 
@@ -1420,6 +1422,9 @@ void CS_Output (CodeSeg* S)
         /* Output the code */
         CE_Output (E);
     }
+
+    /* Prettyier formatting */
+    WriteOutput ("\n");
 
     /* If debug info is enabled, terminate the last line number information */
     if (DebugInfo) {
@@ -1555,9 +1560,9 @@ void CS_GenRegInfo (CodeSeg* S)
 
             /* If this insn is a branch on zero flag, we may have more info on
             ** register contents for one of both flow directions, but only if
-            ** there is a previous instruction.
+            ** we've gone through a previous instruction.
             */
-            if ((E->Info & OF_ZBRA) != 0 && (P = CS_GetPrevEntry (S, I)) != 0) {
+            if (LabelCount == 0 && (E->Info & OF_ZBRA) != 0 && (P = CS_GetPrevEntry (S, I)) != 0) {
 
                 /* Get the branch condition */
                 bc_t BC = GetBranchCond (E->OPC);

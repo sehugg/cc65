@@ -40,6 +40,7 @@
 /* common */
 #include "check.h"
 #include "cpu.h"
+#include "inttypes.h"
 #include "strbuf.h"
 #include "xmalloc.h"
 #include "xsprintf.h"
@@ -92,7 +93,7 @@ static void CheckLocalOffs (unsigned Offs)
 
 
 
-static const char* GetLabelName (unsigned Flags, unsigned long Label, long Offs)
+static const char* GetLabelName (unsigned Flags, uintptr_t Label, long Offs)
 {
     static char Buf [256];              /* Label name */
 
@@ -119,7 +120,7 @@ static const char* GetLabelName (unsigned Flags, unsigned long Label, long Offs)
 
         case CF_ABSOLUTE:
             /* Absolute address */
-            xsprintf (Buf, sizeof (Buf), "$%04X", (int)((Label+Offs) & 0xFFFF));
+            xsprintf (Buf, sizeof (Buf), "$%04X", (unsigned)((Label+Offs) & 0xFFFF));
             break;
 
         case CF_REGVAR:
@@ -729,7 +730,7 @@ void g_getimmed (unsigned Flags, unsigned long Val, long Offs)
 
 
 
-void g_getstatic (unsigned flags, unsigned long label, long offs)
+void g_getstatic (unsigned flags, uintptr_t label, long offs)
 /* Fetch an static memory cell into the primary register */
 {
     /* Create the correct label name */
@@ -1008,7 +1009,7 @@ void g_leavariadic (int Offs)
 
 
 
-void g_putstatic (unsigned flags, unsigned long label, long offs)
+void g_putstatic (unsigned flags, uintptr_t label, long offs)
 /* Store the primary register into the specified static memory cell */
 {
     /* Create the correct label name */
@@ -1478,52 +1479,10 @@ void g_scale (unsigned flags, long val)
 
         /* Scale down */
         val = -val;
-        if ((p2 = PowerOf2 (val)) > 0 && p2 <= 4) {
 
-            /* Factor is 2, 4, 8 and 16 use special function */
-            switch (flags & CF_TYPEMASK) {
-
-                case CF_CHAR:
-                    if (flags & CF_FORCECHAR) {
-                        if (flags & CF_UNSIGNED) {
-                            while (p2--) {
-                                AddCodeLine ("lsr a");
-                            }
-                            break;
-                        } else if (p2 <= 2) {
-                            AddCodeLine ("cmp #$80");
-                            AddCodeLine ("ror a");
-                            break;
-                        }
-                    }
-                    /* FALLTHROUGH */
-
-                case CF_INT:
-                    if (flags & CF_UNSIGNED) {
-                        AddCodeLine ("jsr lsrax%d", p2);
-                    } else {
-                        AddCodeLine ("jsr asrax%d", p2);
-                    }
-                    break;
-
-                case CF_LONG:
-                    if (flags & CF_UNSIGNED) {
-                        AddCodeLine ("jsr lsreax%d", p2);
-                    } else {
-                        AddCodeLine ("jsr asreax%d", p2);
-                    }
-                    break;
-
-                default:
-                    typeerror (flags);
-
-            }
-
-        } else if (val != 1) {
-
-            /* Use a division instead */
+        /* Use a division instead */
+        if (val != 1) {
             g_div (flags | CF_CONST, val);
-
         }
     }
 }
@@ -1540,16 +1499,17 @@ void g_addlocal (unsigned flags, int offs)
 /* Add a local variable to ax */
 {
     unsigned L;
+    int NewOff;
 
     /* Correct the offset and check it */
-    offs -= StackPtr;
-    CheckLocalOffs (offs);
+    NewOff = offs - StackPtr;
+    CheckLocalOffs (NewOff);
 
     switch (flags & CF_TYPEMASK) {
 
         case CF_CHAR:
             L = GetLocalLabel();
-            AddCodeLine ("ldy #$%02X", offs & 0xFF);
+            AddCodeLine ("ldy #$%02X", NewOff & 0xFF);
             AddCodeLine ("clc");
             AddCodeLine ("adc (sp),y");
             AddCodeLine ("bcc %s", LocalLabelName (L));
@@ -1558,7 +1518,7 @@ void g_addlocal (unsigned flags, int offs)
             break;
 
         case CF_INT:
-            AddCodeLine ("ldy #$%02X", offs & 0xFF);
+            AddCodeLine ("ldy #$%02X", NewOff & 0xFF);
             AddCodeLine ("clc");
             AddCodeLine ("adc (sp),y");
             AddCodeLine ("pha");
@@ -1584,7 +1544,7 @@ void g_addlocal (unsigned flags, int offs)
 
 
 
-void g_addstatic (unsigned flags, unsigned long label, long offs)
+void g_addstatic (unsigned flags, uintptr_t label, long offs)
 /* Add a static variable to ax */
 {
     unsigned L;
@@ -1634,7 +1594,7 @@ void g_addstatic (unsigned flags, unsigned long label, long offs)
 
 
 
-void g_addeqstatic (unsigned flags, unsigned long label, long offs,
+void g_addeqstatic (unsigned flags, uintptr_t label, long offs,
                     unsigned long val)
 /* Emit += for a static variable */
 {
@@ -1857,7 +1817,7 @@ void g_addeqind (unsigned flags, unsigned offs, unsigned long val)
 
 
 
-void g_subeqstatic (unsigned flags, unsigned long label, long offs,
+void g_subeqstatic (unsigned flags, uintptr_t label, long offs,
                     unsigned long val)
 /* Emit -= for a static variable */
 {
@@ -2093,7 +2053,7 @@ void g_addaddr_local (unsigned flags attribute ((unused)), int offs)
 
 
 
-void g_addaddr_static (unsigned flags, unsigned long label, long offs)
+void g_addaddr_static (unsigned flags, uintptr_t label, long offs)
 /* Add the address of a static variable to ax */
 {
     /* Create the correct label name */
@@ -2211,7 +2171,7 @@ void g_cmp (unsigned flags, unsigned long val)
 
 
 
-static void oper (unsigned Flags, unsigned long Val, const char** Subs)
+static void oper (unsigned Flags, unsigned long Val, const char* const* Subs)
 /* Encode a binary operation. subs is a pointer to four strings:
 **      0       --> Operate on ints
 **      1       --> Operate on unsigneds
@@ -2424,6 +2384,19 @@ void g_falsejump (unsigned flags attribute ((unused)), unsigned label)
 }
 
 
+void g_lateadjustSP (unsigned label)
+/* Adjust stack based on non-immediate data */
+{
+    AddCodeLine ("pha");
+    AddCodeLine ("lda %s", LocalLabelName (label));
+    AddCodeLine ("clc");
+    AddCodeLine ("adc sp");
+    AddCodeLine ("sta sp");
+    AddCodeLine ("lda %s+1", LocalLabelName (label));
+    AddCodeLine ("adc sp+1");
+    AddCodeLine ("sta sp+1");
+    AddCodeLine ("pla");
+}
 
 void g_drop (unsigned Space)
 /* Drop space allocated on the stack */
@@ -2499,7 +2472,7 @@ void g_stackcheck (void)
 void g_add (unsigned flags, unsigned long val)
 /* Primary = TOS + Primary */
 {
-    static const char* ops[12] = {
+    static const char* const ops[4] = {
         "tosaddax", "tosaddax", "tosaddeax", "tosaddeax"
     };
 
@@ -2515,8 +2488,8 @@ void g_add (unsigned flags, unsigned long val)
 void g_sub (unsigned flags, unsigned long val)
 /* Primary = TOS - Primary */
 {
-    static const char* ops[12] = {
-        "tossubax", "tossubax", "tossubeax", "tossubeax",
+    static const char* const ops[4] = {
+        "tossubax", "tossubax", "tossubeax", "tossubeax"
     };
 
     if (flags & CF_CONST) {
@@ -2531,8 +2504,8 @@ void g_sub (unsigned flags, unsigned long val)
 void g_rsub (unsigned flags, unsigned long val)
 /* Primary = Primary - TOS */
 {
-    static const char* ops[12] = {
-        "tosrsubax", "tosrsubax", "tosrsubeax", "tosrsubeax",
+    static const char* const ops[4] = {
+        "tosrsubax", "tosrsubax", "tosrsubeax", "tosrsubeax"
     };
     oper (flags, val, ops);
 }
@@ -2542,8 +2515,8 @@ void g_rsub (unsigned flags, unsigned long val)
 void g_mul (unsigned flags, unsigned long val)
 /* Primary = TOS * Primary */
 {
-    static const char* ops[12] = {
-        "tosmulax", "tosumulax", "tosmuleax", "tosumuleax",
+    static const char* const ops[4] = {
+        "tosmulax", "tosumulax", "tosmuleax", "tosumuleax"
     };
 
     int p2;
@@ -2649,24 +2622,107 @@ void g_mul (unsigned flags, unsigned long val)
 void g_div (unsigned flags, unsigned long val)
 /* Primary = TOS / Primary */
 {
-    static const char* ops[12] = {
-        "tosdivax", "tosudivax", "tosdiveax", "tosudiveax",
+    static const char* const ops[4] = {
+        "tosdivax", "tosudivax", "tosdiveax", "tosudiveax"
     };
 
     /* Do strength reduction if the value is constant and a power of two */
-    int p2;
-    if ((flags & CF_CONST) && (p2 = PowerOf2 (val)) >= 0) {
+    if (flags & CF_CONST) {
+
+        /* Deal with negative values as well as different sizes */
+        int           Negation   = (flags & CF_UNSIGNED) == 0 && (long)val < 0;
+        unsigned long NegatedVal = (unsigned long)-(long)val;
+        int           p2         = PowerOf2 (Negation ? NegatedVal : val);
+
         /* Generate a shift instead */
-        g_asr (flags, p2);
-    } else {
-        /* Generate a division */
-        if (flags & CF_CONST) {
-            /* lhs is not on stack */
-            flags &= ~CF_FORCECHAR;     /* Handle chars as ints */
-            g_push (flags & ~CF_CONST, 0);
+        if ((flags & CF_UNSIGNED) != 0 && p2 > 0) {
+            g_asr (flags, p2);
+            return;
         }
-        oper (flags, val, ops);
+
+        /* Check if we can afford using shift instead of multiplication at the
+        ** cost of code size */
+        if (p2 == 0 || (p2 > 0 && IS_Get (&CodeSizeFactor) >= (Negation ? 200 : 170))) {
+            /* Generate a conditional shift instead */
+            if (p2 > 0) {
+                unsigned int  DoShiftLabel = GetLocalLabel ();
+                unsigned int  EndLabel     = GetLocalLabel ();
+                unsigned long MaskedVal    = Negation ? val : NegatedVal;
+
+                /* GitHub #169 - if abs(expr) < abs(val), the result is always 0.
+                ** First, check whether expr >= 0 and skip to the shift if true.
+                */
+                switch (flags & CF_TYPEMASK) {
+                case CF_CHAR:
+                    if (flags & CF_FORCECHAR) {
+                        MaskedVal &= 0xFF;
+                        AddCodeLine ("cmp #$00");
+                        AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                        break;
+                    }
+                    /* FALLTHROUGH */
+
+                case CF_INT:
+                    MaskedVal &= 0xFFFF;
+                    AddCodeLine ("cpx #$00");
+                    AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                    break;
+
+                case CF_LONG:
+                    MaskedVal &= 0xFFFFFFFF;
+                    AddCodeLine ("ldy sreg+1");
+                    AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                    break;
+
+                default:
+                    typeerror (flags);
+                    break;
+                }
+                /* Second, check whether expr <= -asb(val) and skip to the
+                ** shift if true. The original content of expr has to be saved
+                ** before the checking comparison and restored after that, as
+                ** the content in Primary register will be destroyed.
+                ** The result of the comparison is a boolean. We can store
+                ** it in the Carry flag with a LSR and branch on it later.
+                */
+                g_save (flags);
+                g_le (flags | CF_UNSIGNED, MaskedVal);
+                AddCodeLine ("lsr a");
+                g_restore (flags);
+                AddCodeLine ("bcs %s", LocalLabelName (DoShiftLabel));
+ 
+                /* The result is 0. We can just load 0 and skip the shifting. */
+                g_getimmed (flags | CF_ABSOLUTE, 0, 0);
+                g_jump (EndLabel);
+
+                /* Do the shift. The sign of the result may need be corrected
+                ** later.
+                */
+                g_defcodelabel (DoShiftLabel);
+                g_asr (flags, p2);
+                g_defcodelabel (EndLabel);
+            }
+
+            /* Negate the result as long as val < 0, even if val == -1 and no
+            ** shift was generated. */
+            if (Negation) {
+                g_neg (flags);
+            }
+
+            /* Done */
+            return;
+        }
+
+        /* If we go here, we didn't emit code. Push the lhs on stack and fall
+        ** into the normal, non-optimized stuff.
+        */
+        flags &= ~CF_FORCECHAR; /* Handle chars as ints */
+        g_push (flags & ~CF_CONST, 0);
     }
+
+    /* Generate a division */
+    oper (flags, val, ops);
+
 }
 
 
@@ -2674,8 +2730,8 @@ void g_div (unsigned flags, unsigned long val)
 void g_mod (unsigned flags, unsigned long val)
 /* Primary = TOS % Primary */
 {
-    static const char* ops[12] = {
-        "tosmodax", "tosumodax", "tosmodeax", "tosumodeax",
+    static const char* const ops[4] = {
+        "tosmodax", "tosumodax", "tosmodeax", "tosumodeax"
     };
     int p2;
 
@@ -2699,8 +2755,8 @@ void g_mod (unsigned flags, unsigned long val)
 void g_or (unsigned flags, unsigned long val)
 /* Primary = TOS | Primary */
 {
-    static const char* ops[12] = {
-        "tosorax", "tosorax", "tosoreax", "tosoreax",
+    static const char* const ops[4] = {
+        "tosorax", "tosorax", "tosoreax", "tosoreax"
     };
 
     /* If the right hand side is const, the lhs is not on stack but still
@@ -2769,8 +2825,8 @@ void g_or (unsigned flags, unsigned long val)
 void g_xor (unsigned flags, unsigned long val)
 /* Primary = TOS ^ Primary */
 {
-    static const char* ops[12] = {
-        "tosxorax", "tosxorax", "tosxoreax", "tosxoreax",
+    static const char* const ops[4] = {
+        "tosxorax", "tosxorax", "tosxoreax", "tosxoreax"
     };
 
 
@@ -2837,8 +2893,8 @@ void g_xor (unsigned flags, unsigned long val)
 void g_and (unsigned Flags, unsigned long Val)
 /* Primary = TOS & Primary */
 {
-    static const char* ops[12] = {
-        "tosandax", "tosandax", "tosandeax", "tosandeax",
+    static const char* const ops[4] = {
+        "tosandax", "tosandax", "tosandeax", "tosandeax"
     };
 
     /* If the right hand side is const, the lhs is not on stack but still
@@ -2929,8 +2985,8 @@ void g_and (unsigned Flags, unsigned long Val)
 void g_asr (unsigned flags, unsigned long val)
 /* Primary = TOS >> Primary */
 {
-    static const char* ops[12] = {
-        "tosasrax", "tosshrax", "tosasreax", "tosshreax",
+    static const char* const ops[4] = {
+        "tosasrax", "tosshrax", "tosasreax", "tosshreax"
     };
 
     /* If the right hand side is const, the lhs is not on stack but still
@@ -2941,6 +2997,22 @@ void g_asr (unsigned flags, unsigned long val)
         switch (flags & CF_TYPEMASK) {
 
             case CF_CHAR:
+                if (flags & CF_FORCECHAR) {
+                    if ((flags & CF_UNSIGNED) != 0 && val <= 4) {
+                        while (val--) {
+                            AddCodeLine ("lsr a");
+                        }
+                        return;
+                    } else if (val <= 2) {
+                        while (val--) {
+                            AddCodeLine ("cmp #$80");
+                            AddCodeLine ("ror a");
+                        }
+                        return;
+                    }
+                }
+                /* FALLTHROUGH */
+
             case CF_INT:
                 val &= 0x0F;
                 if (val >= 8) {
@@ -3060,8 +3132,8 @@ void g_asr (unsigned flags, unsigned long val)
 void g_asl (unsigned flags, unsigned long val)
 /* Primary = TOS << Primary */
 {
-    static const char* ops[12] = {
-        "tosaslax", "tosshlax", "tosasleax", "tosshleax",
+    static const char* const ops[4] = {
+        "tosaslax", "tosshlax", "tosasleax", "tosshleax"
     };
 
 
@@ -3438,8 +3510,8 @@ void g_dec (unsigned flags, unsigned long val)
 void g_eq (unsigned flags, unsigned long val)
 /* Test for equal */
 {
-    static const char* ops[12] = {
-        "toseqax", "toseqax", "toseqeax", "toseqeax",
+    static const char* const ops[4] = {
+        "toseqax", "toseqax", "toseqeax", "toseqeax"
     };
 
     unsigned L;
@@ -3492,8 +3564,8 @@ void g_eq (unsigned flags, unsigned long val)
 void g_ne (unsigned flags, unsigned long val)
 /* Test for not equal */
 {
-    static const char* ops[12] = {
-        "tosneax", "tosneax", "tosneeax", "tosneeax",
+    static const char* const ops[4] = {
+        "tosneax", "tosneax", "tosneeax", "tosneeax"
     };
 
     unsigned L;
@@ -3546,8 +3618,8 @@ void g_ne (unsigned flags, unsigned long val)
 void g_lt (unsigned flags, unsigned long val)
 /* Test for less than */
 {
-    static const char* ops[12] = {
-        "tosltax", "tosultax", "toslteax", "tosulteax",
+    static const char* const ops[4] = {
+        "tosltax", "tosultax", "toslteax", "tosulteax"
     };
 
     unsigned Label;
@@ -3708,8 +3780,8 @@ void g_lt (unsigned flags, unsigned long val)
 void g_le (unsigned flags, unsigned long val)
 /* Test for less than or equal to */
 {
-    static const char* ops[12] = {
-        "tosleax", "tosuleax", "tosleeax", "tosuleeax",
+    static const char* const ops[4] = {
+        "tosleax", "tosuleax", "tosleeax", "tosuleeax"
     };
 
 
@@ -3823,8 +3895,8 @@ void g_le (unsigned flags, unsigned long val)
 void g_gt (unsigned flags, unsigned long val)
 /* Test for greater than */
 {
-    static const char* ops[12] = {
-        "tosgtax", "tosugtax", "tosgteax", "tosugteax",
+    static const char* const ops[4] = {
+        "tosgtax", "tosugtax", "tosgteax", "tosugteax"
     };
 
 
@@ -3954,8 +4026,8 @@ void g_gt (unsigned flags, unsigned long val)
 void g_ge (unsigned flags, unsigned long val)
 /* Test for greater than or equal to */
 {
-    static const char* ops[12] = {
-        "tosgeax", "tosugeax", "tosgeeax", "tosugeeax",
+    static const char* const ops[4] = {
+        "tosgeax", "tosugeax", "tosgeeax", "tosugeeax"
     };
 
     unsigned Label;
@@ -4242,7 +4314,7 @@ void g_initauto (unsigned Label, unsigned Size)
         AddCodeLine ("lda %s,y", GetLabelName (CF_STATIC, Label, 0));
         AddCodeLine ("sta (sp),y");
         AddCodeLine ("iny");
-	AddCmpCodeIfSizeNot256 ("cpy #$%02X", Size);
+        AddCmpCodeIfSizeNot256 ("cpy #$%02X", Size);
         AddCodeLine ("bne %s", LocalLabelName (CodeLabel));
     }
 }
@@ -4267,7 +4339,7 @@ void g_initstatic (unsigned InitLabel, unsigned VarLabel, unsigned Size)
         AddCodeLine ("lda %s,y", GetLabelName (CF_STATIC, InitLabel, 0));
         AddCodeLine ("sta %s,y", GetLabelName (CF_STATIC, VarLabel, 0));
         AddCodeLine ("iny");
-	AddCmpCodeIfSizeNot256 ("cpy #$%02X", Size);
+        AddCmpCodeIfSizeNot256 ("cpy #$%02X", Size);
         AddCodeLine ("bne %s", LocalLabelName (CodeLabel));
     } else {
         /* Use the easy way here: memcpy() */
@@ -4276,7 +4348,7 @@ void g_initstatic (unsigned InitLabel, unsigned VarLabel, unsigned Size)
         g_getimmed (CF_STATIC, InitLabel, 0);
         AddCodeLine ("jsr pushax");
         g_getimmed (CF_INT | CF_UNSIGNED | CF_CONST, Size, 0);
-        AddCodeLine ("jsr %s", GetLabelName (CF_EXTERNAL, (unsigned long) "memcpy", 0));
+        AddCodeLine ("jsr %s", GetLabelName (CF_EXTERNAL, (uintptr_t) "memcpy", 0));
     }
 }
 

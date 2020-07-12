@@ -1471,7 +1471,7 @@ unsigned OptTransfers2 (CodeSeg* S)
             (N = CS_GetNextEntry (S, I)) != 0       &&
             !CE_HasLabel (N)                        &&
             (N->Info & OF_XFR) != 0                 &&
-            GetRegInfo (S, I+2, E->Chg) != E->Chg) {
+            (GetRegInfo (S, I+2, E->Chg) & E->Chg) == 0) {
 
             CodeEntry* X = 0;
 
@@ -1892,6 +1892,7 @@ unsigned OptPushPop (CodeSeg* S)
     while (I < CS_GetEntryCount (S)) {
 
         CodeEntry* X;
+        CodeEntry* N;
 
         /* Get next entry */
         CodeEntry* E = CS_GetEntry (S, I);
@@ -1944,11 +1945,13 @@ unsigned OptPushPop (CodeSeg* S)
                 if (E->OPC == OP65_STA                          &&
                     (E->AM == AM65_ABS || E->AM == AM65_ZP)     &&
                     !CE_HasLabel (E)                            &&
-                    !RegAUsed (S, I+1)                          &&
+                    ((N = CS_GetNextEntry (S, I)) == 0          ||
+                     (!CE_UseLoadFlags (N)                      &&
+                      !RegAUsed (S, I+1)))                      &&
                     !MemAccess (S, Push+1, Pop-1, E)) {
 
                     /* Insert a STA after the PHA */
-                    X = NewCodeEntry (E->OPC, E->AM, E->Arg, E->JumpTo, E->LI);
+                    X = NewCodeEntry (OP65_STA, E->AM, E->Arg, E->JumpTo, E->LI);
                     CS_InsertEntry (S, X, Push+1);
 
                     /* Remove the PHA instead */
@@ -1963,7 +1966,7 @@ unsigned OptPushPop (CodeSeg* S)
                     /* Remember we had changes */
                     ++Changes;
 
-                } else if ((E->Info & OF_CBRA) == 0     &&
+                } else if (!CE_UseLoadFlags (E) &&
                            (!RegAUsed (S, I) || !ChgA)) {
 
                     /* We can remove the PHA and PLA instructions */
@@ -2056,8 +2059,14 @@ unsigned OptPrecalc (CodeSeg* S)
                 ** results we don't already have (including the flags), so
                 ** remove it. Something like this is generated as a result of
                 ** a compare where parts of the values are known to be zero.
+                ** The only situation where we need to leave things as they are
+                ** is when V flag is being tested in the next instruction,
+                ** because ADC/SBC #0 always clears it.
                 */
-                if (In->RegA == 0 && CE_IsKnownImm (E, 0x00)) {
+                if (In->RegA == 0 && CE_IsKnownImm (E, 0x00) &&
+                    (E = CS_GetEntry (S, I + 1))             &&
+                    E->OPC != OP65_BVC                       &&
+                    E->OPC != OP65_BVS ) {
                     /* 0-0 or 0+0 -> remove */
                     CS_DelEntry (S, I);
                     ++Changes;

@@ -114,6 +114,7 @@ typedef enum {
     OP65_SED,
     OP65_SEI,
     OP65_STA,
+    OP65_STP,                   /* 65c02, 65816 stop */
     OP65_STX,
     OP65_STY,
     OP65_STZ,
@@ -134,7 +135,7 @@ typedef enum {
 typedef enum {
     AM65_IMP,                   /* implicit */
     AM65_ACC,                   /* accumulator */
-    AM65_IMM,                   /* immidiate */
+    AM65_IMM,                   /* immediate */
     AM65_ZP,                    /* zeropage */
     AM65_ZPX,                   /* zeropage,X */
     AM65_ZPY,                   /* zeropage,Y */
